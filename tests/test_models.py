@@ -1,21 +1,9 @@
 """Tests for SQLAlchemy models and database helpers."""
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from datetime import datetime
 
-from database.models import Base, Driver, RideRequest, Trip, Vehicle
-from database.db import init_db, get_session
-
-
-@pytest.fixture()
-def db_session():
-    """Yield a session backed by an in-memory SQLite database."""
-    engine = create_engine("sqlite:///:memory:")
-    init_db(db_engine=engine)
-    session = get_session(db_engine=engine)
-    yield session
-    session.close()
+from database.models import Driver, RideRequest, Trip, Vehicle
 
 
 # ---- Vehicle tests -------------------------------------------------------
@@ -62,6 +50,13 @@ class TestVehicle:
         with pytest.raises(Exception):
             db_session.commit()
 
+    def test_vehicle_repr(self, db_session):
+        v = Vehicle(registration_number="KA-03-GH-9012", model="Sedan", capacity=4)
+        db_session.add(v)
+        db_session.commit()
+        assert "KA-03-GH-9012" in repr(v)
+        assert "Sedan" in repr(v)
+
 
 # ---- Driver tests ---------------------------------------------------------
 
@@ -99,13 +94,17 @@ class TestDriver:
         assert result.vehicle is not None
         assert result.vehicle.registration_number == "KA-05-EF-9999"
 
+    def test_driver_default_status(self, db_session):
+        d = Driver(name="Test", license_number="DL-0000000099", phone="9000000099")
+        db_session.add(d)
+        db_session.commit()
+        assert db_session.query(Driver).first().status == "available"
+
 
 # ---- RideRequest tests ----------------------------------------------------
 
 class TestRideRequest:
     def test_create_ride_request(self, db_session):
-        from datetime import datetime
-
         rr = RideRequest(
             employee_name="Alice",
             pickup_location="Office",
@@ -121,8 +120,6 @@ class TestRideRequest:
         assert result.status == "pending"
 
     def test_ride_request_default_status(self, db_session):
-        from datetime import datetime
-
         rr = RideRequest(
             employee_name="Bob",
             pickup_location="Home",
@@ -139,8 +136,6 @@ class TestRideRequest:
 
 class TestTrip:
     def test_create_trip(self, db_session):
-        from datetime import datetime
-
         v = Vehicle(registration_number="KA-99-ZZ-0001", model="Sedan", capacity=4)
         d = Driver(name="Mohan", license_number="DL-9999999999", phone="9111111111")
         rr = RideRequest(
@@ -169,8 +164,6 @@ class TestTrip:
         assert result.driver.name == "Mohan"
 
     def test_trip_default_status(self, db_session):
-        from datetime import datetime
-
         v = Vehicle(registration_number="KA-88-YY-0002", model="SUV", capacity=7)
         d = Driver(name="Priya", license_number="DL-8888888888", phone="9222222222")
         rr = RideRequest(
@@ -188,3 +181,25 @@ class TestTrip:
         db_session.commit()
 
         assert db_session.query(Trip).first().status == "scheduled"
+
+    def test_trip_relationships(self, db_session):
+        """Verify the Trip model navigates back to its related entities."""
+        v = Vehicle(registration_number="KA-77-WW-0003", model="Hatchback", capacity=4)
+        d = Driver(name="Anita", license_number="DL-7777777777", phone="9333333333")
+        rr = RideRequest(
+            employee_name="Eve",
+            pickup_location="Block A",
+            drop_location="Block B",
+            ride_date=datetime(2026, 10, 14, 16, 0),
+            status="approved",
+        )
+        db_session.add_all([v, d, rr])
+        db_session.commit()
+
+        trip = Trip(ride_request_id=rr.id, vehicle_id=v.id, driver_id=d.id)
+        db_session.add(trip)
+        db_session.commit()
+
+        # Navigate from ride_request back to trip
+        assert rr.trip is not None
+        assert rr.trip.id == trip.id
